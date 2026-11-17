@@ -5,3 +5,7 @@
 .ipynb_checkpoints/
 .*pyc
 
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class

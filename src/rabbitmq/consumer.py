@@ -184,7 +184,6 @@ def process_message(ch, method, properties, body):
 
     logger.info(
         f"[{SERVICE_NAME} Consumer] Received task for studyId: '{study_id}' "
-        f"(reportId: '{report_id}', requestId: '{request_id}')"
     )
 
     try:

@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 
 def publish_result(
     study_id: str,
-    result: dict,
-    report_id: str = None,
-    request_id: str = None,
+    result: dict
 ) -> bool:
     """
     Publishes AI inference results back to the backend's shared result queue.
@@ -44,7 +42,6 @@ def publish_result(
         )
 
         message = {
-            "service": SERVICE_NAME,
             "studyId": study_id,
             "result": result,
         }

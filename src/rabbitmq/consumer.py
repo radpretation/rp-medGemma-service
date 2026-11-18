@@ -174,10 +174,8 @@ def process_message(ch, method, properties, body):
         return
 
     # Extract standard fields dispatched from the Radpretation Backend
-    study_id = payload.get("studyId") or payload.get("studyID")
+    study_id = payload.get("studyId")
     auth_token = payload.get("AI_AUTH_TOKEN") or payload.get("auth-token") or payload.get("authToken") or ""
-    report_id = payload.get("reportId")
-    request_id = payload.get("requestId") or getattr(properties, "message_id", None)
 
     if not study_id:
         logger.error(f"[{SERVICE_NAME} Consumer] Missing 'studyId' in payload. Discarding to DLQ.")
@@ -233,8 +231,6 @@ def process_message(ch, method, properties, body):
             publish_result(
                 study_id=study_id,
                 result=result,
-                report_id=report_id,
-                request_id=request_id,
             )
 
             # Successfully finished, acknowledge the incoming request

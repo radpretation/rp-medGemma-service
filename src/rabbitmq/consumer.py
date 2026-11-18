@@ -5,6 +5,19 @@ import sys
 import time
 from datetime import datetime, timezone
 import pika
+import os
+
+
+# Add project root (rp-medGemma-service/) to sys.path so `src`, `utils`, and `model` resolve
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+from src.router.router import predict, InferencePayload
+from src.configuration.config import DICOM_TEMP_PATH
 
 from config import (
     SERVICE_NAME,
@@ -177,64 +190,62 @@ def process_message(ch, method, properties, body):
     )
 
     try:
-        # ==============================================================================
-        # >>>>>>>>>>>>>>>>>> YOUR AI SERVICE INFERENCE LOGIC HERE <<<<<<<<<<<<<<<<<<<<
-        # ==============================================================================
-        #
-        # Available variables from the RabbitMQ job message:
-        #   - study_id   (str) : The Orthanc study instance UID / study ID
-        #   - auth_token (str) : The PACS / SuperAdmin bearer session token or basic auth
-        #   - report_id  (str) : MongoDB ScanReport ID (if applicable)
-        #   - request_id (str) : Unique request correlation ID
-        #
-        # Implementation Checklist:
-        #   1. Fetch DICOM series/instances from Orthanc PACS:
-        #      GET {PACS_URL}/studies/{study_id}/archive
-        #      Header: Authorization: Bearer {auth_token}  (or Basic {auth_token})
-        #   2. Feed downloaded DICOM files into your MedGemma neural network model
-        #   3. Format the model prediction output dictionary matching IMedgemma schema:
-        #
-        # Example output structure:
-        # ------------------------------------------------------------------------------
-        # result = {
-        #     "normal": False,                      # True if scan has no significant findings
-        #     "abnormality": ["Infiltrate", "Mass"], # Array of abnormality strings
-        #     "body_part": "Chest",                 # Examined body region
-        #     "finding": "Bilateral lung infiltrates observed in lower lobes..." # Clinical summary
-        # }
-        # ------------------------------------------------------------------------------
-
-        # --- [START OF PLACEHOLDER - REPLACE THIS WITH ACTUAL MODEL INFERENCE] ---
         logger.info(f"[{SERVICE_NAME} Consumer] Executing MedGemma inference for study '{study_id}'...")
-        
-        # Simulated inference result (Replace this dictionary with your real AI predictions):
-        result = {
-            "normal": False,
-            "abnormality": ["Sample Finding"],
-            "body_part": "Chest",
-            "finding": f"Automated MedGemma analysis executed for study {study_id}.",
-        }
-        # --- [END OF PLACEHOLDER] ---
 
-        # ==============================================================================
-        # >>>>>>>>>>>>>>>>>> END OF AI INFERENCE LOGIC <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-        # ==============================================================================
-
-        # Validate that inference result is formatted properly
-        if not isinstance(result, dict):
-            raise ValueError(f"AI inference output must be a dictionary, got: {type(result)}")
-
-        # Publish the results back to the backend's shared result queue
-        publish_result(
-            study_id=study_id,
-            result=result,
-            report_id=report_id,
-            request_id=request_id,
+        # Assemble inference payload and directly invoke router.py::predict()
+        payload_obj = InferencePayload(
+            studyId=study_id,
+            pacsUrl=payload.get("pacsUrl"),
+            authCred=auth_token or None,  # falls back to AUTH_CRED env var if None
         )
+        response = predict(payload_obj)
 
-        # Successfully finished, acknowledge the incoming request
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-        logger.info(f"[{SERVICE_NAME} Consumer] Successfully completed and acknowledged study '{study_id}'")
+        if response.status_code == 200:
+            # Parse response to get the file_id
+            res_data = json.loads(response.body.decode("utf-8"))
+            file_id = res_data.get("file_id")
+
+            if not file_id:
+                raise ValueError("Prediction response did not return a valid file_id")
+
+            # Load the predictions file written by router.py
+            predictions_path = os.path.join(DICOM_TEMP_PATH, file_id, "predictions.json")
+            if not os.path.exists(predictions_path):
+                raise FileNotFoundError(f"Predictions file not found at path: {predictions_path}")
+
+            with open(predictions_path, "r", encoding="utf-8") as f:
+                result = json.load(f)
+
+            # Cleanup the temp files and directories
+            try:
+                os.remove(predictions_path)
+                dir_path = os.path.join(DICOM_TEMP_PATH, file_id)
+                if os.path.exists(dir_path) and not os.listdir(dir_path):
+                    os.rmdir(dir_path)
+            except Exception as cleanup_err:
+                logger.warning(f"[{SERVICE_NAME} Consumer] Temp prediction folder cleanup error: {cleanup_err}")
+
+            # Validate that inference result is formatted properly
+            if not isinstance(result, dict):
+                raise ValueError(f"AI inference output must be a dictionary, got: {type(result)}")
+
+            # Publish the results back to the backend's shared result queue
+            publish_result(
+                study_id=study_id,
+                result=result,
+                report_id=report_id,
+                request_id=request_id,
+            )
+
+            # Successfully finished, acknowledge the incoming request
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            logger.info(f"[{SERVICE_NAME} Consumer] Successfully completed and acknowledged study '{study_id}'")
+        else:
+            # Prediction failed (e.g., HTTP 400, 404/401 from PACS, or 500)
+            error_msg = response.body.decode("utf-8")
+            reason = f"Non-200 response status: {response.status_code} ({error_msg})"
+            logger.error(f"[{SERVICE_NAME} Consumer] Inference failed for study '{study_id}': {reason}")
+            schedule_retry(ch, method, properties, payload, study_id, reason)
 
     except Exception as err:
         logger.error(
@@ -242,7 +253,6 @@ def process_message(ch, method, properties, body):
             exc_info=True,
         )
         schedule_retry(ch, method, properties, payload, study_id, str(err), err)
-
 
 def setup_queues_and_exchanges(channel):
     """

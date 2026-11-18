@@ -8,7 +8,7 @@ import os
 # ==============================================================================
 
 # 1. Broker Connection Settings
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://admin:Test1234@182.77.48.121:5672/")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://localhost")
 HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "60"))
 BLOCKED_CONNECTION_TIMEOUT = int(os.getenv("BLOCKED_CONNECTION_TIMEOUT", "300"))
 

@@ -54,14 +54,12 @@ def publish_result(
             body=payload.encode("utf-8"),
             properties=pika.BasicProperties(
                 delivery_mode=2,  # Persistent message on disk
-                content_type="application/json",
-                message_id=request_id,
+                content_type="application/json"
             ),
         )
 
         logger.info(
             f"[RabbitMQ Producer] Published {SERVICE_NAME} result for studyId '{study_id}' "
-            f"(reportId: '{report_id}', requestId: '{request_id}') to '{RESULT_QUEUE}'"
         )
         return True
     except Exception as err:

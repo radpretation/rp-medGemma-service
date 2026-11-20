@@ -212,7 +212,7 @@ async def get_json_object(file_id: str):
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-LOCAL_DATASET_DIR = os.path.join(PROJECT_ROOT, "Ayurveda_DX_Dataset")
+LOCAL_DATASET_DIR = os.path.join(PROJECT_ROOT, "ayurveda_dx_studies")
 
 
 class LocalZipInferencePayload(BaseModel):
@@ -285,18 +285,39 @@ def predict_from_zip(
 
     try:
         # ── 1. Locate Local Study ZIP ─────────────────────────────────────────
-        study_dir = os.path.join(LOCAL_DATASET_DIR, payload.studyId)
-        zip_path = os.path.join(study_dir, f"{payload.studyId}.zip")
 
-        if not os.path.isfile(zip_path):
-            fallback_zips = glob.glob(os.path.join(study_dir, "*.zip")) if os.path.isdir(study_dir) else []
-            if fallback_zips:
-                zip_path = fallback_zips[0]
-            else:
-                return JSONResponse(
-                    status_code=404,
-                    content={"error": f"Study ZIP not found at expected path: {zip_path}"}
-                )
+        ## changed logic for downloaded file access from system
+
+        direct_zip = os.path.join(LOCAL_DATASET_DIR, f"{payload.studyId}.zip")
+        study_dir = os.path.join(LOCAL_DATASET_DIR, payload.studyId)
+        nested_zip = os.path.join(study_dir, f"{payload.studyId}.zip")
+        if os.path.isfile(direct_zip):
+            zip_path = direct_zip
+        elif os.path.isfile(nested_zip):
+            zip_path = nested_zip
+        elif os.path.isdir(study_dir) and glob.glob(os.path.join(study_dir, "*.zip")):
+            zip_path = glob.glob(os.path.join(study_dir, "*.zip"))[0]
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={"error": f"Study ZIP not found at expected path: {direct_zip}"}
+            )
+        
+        #______________________________________________________________________________
+
+
+        # study_dir = os.path.join(LOCAL_DATASET_DIR, payload.studyId)
+        # zip_path = os.path.join(study_dir, f"{payload.studyId}.zip")
+
+        # if not os.path.isfile(zip_path):
+        #     fallback_zips = glob.glob(os.path.join(study_dir, "*.zip")) if os.path.isdir(study_dir) else []
+        #     if fallback_zips:
+        #         zip_path = fallback_zips[0]
+        #     else:
+        #         return JSONResponse(
+        #             status_code=404,
+        #             content={"error": f"Study ZIP not found at expected path: {zip_path}"}
+        #         )
 
         print(f"Found local study zip for {payload.studyId}: {zip_path}. Extracting...")
 
